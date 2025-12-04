@@ -1,0 +1,7 @@
+Benchmark,GA_MP,GA_MP_RL,GA_RL,GA_baseline
+rastrigin,4,3,2,1
+rosenbrock,4,3,2,1
+ackley,3,4,2,1
+
+Average Rank,3.67,3.33,2.00,1.00
+Best Count,0,0,0,3

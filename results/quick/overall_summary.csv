@@ -1,0 +1,16 @@
+Benchmark,Algorithm,Final_Mean,Final_Std,Final_Mean±Std
+rastrigin,GA_MP,1.403549e+02,9.809405e+00,1.4035e+02 ± 9.8094e+00
+rastrigin,GA_MP_RL,1.054623e+02,1.242384e+01,1.0546e+02 ± 1.2424e+01
+rastrigin,GA_RL,7.061816e+01,1.206966e+01,7.0618e+01 ± 1.2070e+01
+rastrigin,GA_baseline,7.026641e+01,2.341326e+00,7.0266e+01 ± 2.3413e+00
+
+rosenbrock,GA_MP,1.555681e+06,5.255359e+05,1.5557e+06 ± 5.2554e+05
+rosenbrock,GA_MP_RL,1.010698e+06,5.111086e+05,1.0107e+06 ± 5.1111e+05
+rosenbrock,GA_RL,3.288425e+05,1.515350e+05,3.2884e+05 ± 1.5153e+05
+rosenbrock,GA_baseline,2.283002e+05,5.712044e+04,2.2830e+05 ± 5.7120e+04
+
+ackley,GA_MP,1.293888e+01,2.457432e-01,1.2939e+01 ± 2.4574e-01
+ackley,GA_MP_RL,1.425018e+01,4.257713e-01,1.4250e+01 ± 4.2577e-01
+ackley,GA_RL,1.187693e+01,5.563563e-01,1.1877e+01 ± 5.5636e-01
+ackley,GA_baseline,7.975688e+00,1.381790e-01,7.9757e+00 ± 1.3818e-01
+

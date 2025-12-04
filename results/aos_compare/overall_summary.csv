@@ -1,0 +1,21 @@
+Benchmark,Algorithm,Final_Mean,Final_Std,Final_Mean±Std
+rastrigin,GA_Hybrid,9.777320e+00,1.838835e+00,9.7773e+00 ± 1.8388e+00
+rastrigin,GA_RL,6.466724e+00,1.495665e+00,6.4667e+00 ± 1.4957e+00
+rastrigin,GA_UCB,1.005538e+01,2.006835e+00,1.0055e+01 ± 2.0068e+00
+rastrigin,GA_baseline,1.287261e+01,1.896750e+00,1.2873e+01 ± 1.8967e+00
+
+schwefel,GA_Hybrid,1.006741e+02,5.852435e+01,1.0067e+02 ± 5.8524e+01
+schwefel,GA_RL,3.891330e+01,1.417657e+01,3.8913e+01 ± 1.4177e+01
+schwefel,GA_UCB,6.505739e+01,5.443302e+01,6.5057e+01 ± 5.4433e+01
+schwefel,GA_baseline,1.259599e+03,2.494249e+02,1.2596e+03 ± 2.4942e+02
+
+ackley,GA_Hybrid,3.526078e+00,2.904694e-01,3.5261e+00 ± 2.9047e-01
+ackley,GA_RL,3.364794e+00,4.312349e-01,3.3648e+00 ± 4.3123e-01
+ackley,GA_UCB,3.592454e+00,3.232236e-01,3.5925e+00 ± 3.2322e-01
+ackley,GA_baseline,2.780741e+00,1.242548e-01,2.7807e+00 ± 1.2425e-01
+
+griewank,GA_Hybrid,1.475727e+00,1.213968e-01,1.4757e+00 ± 1.2140e-01
+griewank,GA_RL,1.447525e+00,1.996152e-01,1.4475e+00 ± 1.9962e-01
+griewank,GA_UCB,1.411326e+00,9.285401e-02,1.4113e+00 ± 9.2854e-02
+griewank,GA_baseline,1.422764e+00,9.467711e-02,1.4228e+00 ± 9.4677e-02
+

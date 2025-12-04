@@ -1,0 +1,8 @@
+Benchmark,GA_Hybrid,GA_RL,GA_UCB,GA_baseline
+rastrigin,2,1,3,4
+schwefel,3,1,2,4
+ackley,3,2,4,1
+griewank,4,3,1,2
+
+Average Rank,3.00,1.75,2.50,2.75
+Best Count,0,2,1,1

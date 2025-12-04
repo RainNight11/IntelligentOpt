@@ -1,0 +1,311 @@
+# ============================================================================
+# RL-GA 实验配置文件
+# ============================================================================
+# 本文件定义遗传算法与强化学习混合优化实验的所有参数
+# 使用方法: python experiments.py --mode full  (或 quick/ablation/debug)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 实验模式预设
+# ----------------------------------------------------------------------------
+# 选择要运行的模式: full, quick, ablation, debug, custom
+default_mode: full
+
+# ============================================================================
+# 一、GA 基础参数
+# ============================================================================
+ga:
+  # 种群参数
+  population_size: 200        # 种群大小 [建议: 50-500]
+  dim: 30                     # 问题维度（决策变量数量）
+  
+  # 进化参数
+  num_generations: 500        # 最大进化代数 [建议: 100-2000]
+  p_c: 0.9                    # 交叉概率 [建议: 0.6-0.95]
+  p_m: 0.05                   # 变异概率 [建议: 0.01-0.1]
+  
+  # 精英保留
+  elitism_count: 2            # 精英保留数量 [建议: 1-5, 0=禁用]
+  
+  # 早停机制
+  early_stop_patience: 50     # 连续N代无改进则停止 [建议: 20-100, 0=禁用]
+  early_stop_tolerance: 1.0e-8  # 改进小于此值视为无改进
+  
+  # 算子参数
+  gaussian_sigma: 0.1         # 高斯变异标准差系数 [建议: 0.05-0.2]
+  tournament_k: 3             # 锦标赛候选数量 [建议: 2-5]
+
+# ============================================================================
+# 二、多种群参数
+# ============================================================================
+multipop:
+  num_subpops: 4              # 子种群数量 [建议: 2-8, 需整除population_size]
+  migration_period: 10        # 迁移周期（代数）[建议: 5-20]
+  improvement_window: 10      # 改进判断窗口大小 [建议: 5-20]
+  migration_count: 3          # 每次迁移个体数 [建议: 1-5]
+  migration_good_threshold: 0.01   # "优秀"子种群改进率阈值
+  migration_bad_threshold: 0.001   # "停滞"子种群改进率阈值
+
+# ============================================================================
+# 三、RL（强化学习）参数
+# ============================================================================
+rl:
+  # Q-learning 核心参数
+  num_states: 9               # 状态空间大小 (3×3: 多样性×改进)
+  num_actions: 6              # 动作空间大小（算子组合数）
+  alpha: 0.3                  # 学习率 [建议: 0.1-0.5]
+  gamma: 0.9                  # 折扣因子 [建议: 0.8-0.99]
+  
+  # 探索策略 (ε-greedy)
+  epsilon_start: 0.3          # 初始探索率
+  epsilon_end: 0.05           # 最终探索率
+  
+  # 奖励函数权重
+  reward_fitness_weight: 0.8  # 适应度改进权重 [建议: 0.6-0.9]
+  reward_diversity_weight: 0.2 # 多样性变化权重 [和=1.0]
+
+# ============================================================================
+# 四、算法变体定义
+# ============================================================================
+algorithms:
+  GA_baseline:
+    name: "基础遗传算法"
+    description: "单种群，固定算子"
+    use_multipop: false
+    use_rescue_migration: false
+    use_rl: false
+  
+  GA_MP:
+    name: "多种群遗传算法"
+    description: "多种群并行进化，含救援迁移策略"
+    use_multipop: true
+    use_rescue_migration: true
+    use_rl: false
+  
+  GA_RL:
+    name: "RL增强遗传算法"
+    description: "Q-learning自适应算子选择"
+    use_multipop: false
+    use_rescue_migration: false
+    use_rl: true
+  
+  GA_MP_RL:
+    name: "混合算法"
+    description: "多种群 + RL自适应"
+    use_multipop: true
+    use_rescue_migration: true
+    use_rl: true
+
+# ============================================================================
+# 五、基准测试函数
+# ============================================================================
+benchmarks:
+  # 单峰函数（简单）
+  sphere:
+    name: "Sphere"
+    type: "unimodal"
+    bounds: [-100, 100]
+    optimal: 0
+  schwefel_222:
+    name: "Schwefel 2.22"
+    type: "unimodal"
+    bounds: [-10, 10]
+    optimal: 0
+  sum_squares:
+    name: "Sum of Squares"
+    type: "unimodal"
+    bounds: [-10, 10]
+    optimal: 0
+  
+  # 多峰函数（困难）
+  rastrigin:
+    name: "Rastrigin"
+    type: "multimodal"
+    bounds: [-5.12, 5.12]
+    optimal: 0
+  rosenbrock:
+    name: "Rosenbrock"
+    type: "multimodal"
+    bounds: [-30, 30]
+    optimal: 0
+  ackley:
+    name: "Ackley"
+    type: "multimodal"
+    bounds: [-32, 32]
+    optimal: 0
+  griewank:
+    name: "Griewank"
+    type: "multimodal"
+    bounds: [-600, 600]
+    optimal: 0
+  levy:
+    name: "Levy"
+    type: "multimodal"
+    bounds: [-10, 10]
+    optimal: 0
+  schwefel:
+    name: "Schwefel"
+    type: "multimodal"
+    bounds: [-500, 500]
+    optimal: 0
+
+# ============================================================================
+# 六、实验模式预设
+# ============================================================================
+modes:
+  # -------------------- 论文完整实验 --------------------
+  full:
+    description: "论文实验：30种子，500代，8基准函数，4算法，含统计检验"
+    seeds: 30                   # 随机种子数量（统计显著性要求）
+    ga:
+      population_size: 200
+      num_generations: 500
+      early_stop_patience: 0    # 论文实验禁用早停，确保曲线完整
+    algorithms:
+      - GA_baseline             # 基线算法
+      - GA_MP                   # +多种群
+      - GA_RL                   # +RL控制
+      - GA_MP_RL                # 完整算法（本文提出）
+    benchmarks:
+      # 单峰函数（2个）
+      - sphere                  # F1: 简单基准
+      - sum_squares             # F2: 加权球形
+      # 多峰函数（6个）
+      - rastrigin               # F3: 高度多峰（经典）
+      - ackley                  # F4: 多峰+平坦区域
+      - griewank                # F5: 多峰
+      - rosenbrock              # F6: 山谷形状（困难）
+      - levy                    # F7: 多峰
+      - schwefel                # F8: 欺骗性（全局最优远离局部最优）
+    output_dir: "results/full"
+  
+  # -------------------- 快速测试 --------------------
+  quick:
+    description: "快速测试：3种子，50代"
+    seeds: 3
+    ga:
+      population_size: 60
+      num_generations: 50
+    multipop:
+      migration_period: 5
+      improvement_window: 5
+    algorithms:
+      - GA_baseline
+      - GA_MP
+      - GA_RL
+      - GA_MP_RL
+    benchmarks:
+      - rastrigin
+      - rosenbrock
+      - ackley
+    output_dir: "results/quick"
+  
+  # -------------------- 消融实验 --------------------
+  ablation:
+    description: "消融实验：对比各组件贡献"
+    seeds: 20
+    ga:
+      population_size: 200
+      num_generations: 300
+    algorithms:
+      - GA_baseline           # 基线
+      - GA_MP                 # +多种群
+      - GA_RL                 # +RL
+      - GA_MP_RL              # +多种群+RL
+    benchmarks:
+      - rastrigin             # 高度多峰
+      - rosenbrock            # 山谷形状
+      - ackley                # 多峰+平坦
+      - griewank              # 额外测试
+      - sphere                # 简单基线
+    output_dir: "results/ablation"
+  
+  # -------------------- 调试模式 --------------------
+  debug:
+    description: "调试：最小配置，单次运行"
+    seeds: 1
+    ga:
+      population_size: 40
+      dim: 10
+      num_generations: 20
+    multipop:
+      num_subpops: 2
+    algorithms:
+      - GA_baseline
+    benchmarks:
+      - rastrigin
+    output_dir: "results/debug"
+    save_every_seed: false
+  
+  # -------------------- 参数敏感性分析 --------------------
+  sensitivity:
+    description: "参数敏感性分析"
+    seeds: 10
+    ga:
+      population_size: 100
+      num_generations: 200
+    algorithms:
+      - GA_MP_RL
+    benchmarks:
+      - rastrigin
+    output_dir: "results/sensitivity"
+    # 参数扫描范围
+    param_sweep:
+      rl.alpha: [0.1, 0.2, 0.3, 0.4, 0.5]
+      rl.gamma: [0.8, 0.85, 0.9, 0.95]
+      multipop.num_subpops: [2, 4, 6, 8]
+  
+  # -------------------- 可扩展性测试 --------------------
+  scalability:
+    description: "维度可扩展性测试"
+    seeds: 10
+    ga:
+      population_size: 200
+      num_generations: 500
+    algorithms:
+      - GA_baseline
+      - GA_MP_RL
+    benchmarks:
+      - rastrigin
+      - rosenbrock
+    output_dir: "results/scalability"
+    # 维度扫描
+    dimensions: [10, 20, 30, 50, 100]
+
+# ============================================================================
+# 七、输出配置
+# ============================================================================
+output:
+  figures_dir: "figures"        # 图表保存目录
+  results_dir: "results"        # 数据保存目录
+  save_every_seed: true         # 每个seed保存中间结果
+  save_format: "csv"            # 保存格式: csv, npz
+  
+  # 图表设置
+  plot:
+    dpi: 200                    # 图像分辨率
+    figsize: [7, 5]             # 图像尺寸
+    style: "seaborn-v0_8-whitegrid"  # matplotlib样式
+    
+  # 日志设置
+  logging:
+    level: "INFO"               # 日志级别: DEBUG, INFO, WARNING, ERROR
+    file: "experiment.log"      # 日志文件名
+
+# ============================================================================
+# 八、高级选项
+# ============================================================================
+advanced:
+  # 随机数控制
+  random_seed_base: 0           # 种子起始值
+  
+  # 并行计算（预留）
+  parallel:
+    enabled: false              # 是否启用并行
+    n_jobs: -1                  # 并行任务数 (-1=全部CPU)
+  
+  # 缓存设置
+  cache:
+    enabled: false              # 是否缓存中间结果
+    dir: ".cache"               # 缓存目录
+
