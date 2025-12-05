@@ -28,6 +28,12 @@ class GABaseParams:
     num_generations: int = 500
     p_c: float = 0.9
     p_m: float = 0.05
+    p_m_min: float = 0.005
+    p_m_max: float = 0.3
+    explore_p_m_scale: float = 1.6
+    exploit_p_m_scale: float = 0.6
+    explore_sigma_scale: float = 1.4
+    exploit_sigma_scale: float = 0.7
     elitism_count: int = 2
     early_stop_patience: int = 50
     early_stop_tolerance: float = 1e-8
@@ -44,12 +50,16 @@ class MultiPopParams:
     migration_count: int = 3
     migration_good_threshold: float = 0.01
     migration_bad_threshold: float = 0.001
+    migration_noise_sigma: float = 0.02
+    stagnation_div_threshold: float = 0.15
+    stagnation_imp_threshold: float = 0.001
+    stagnation_replace_frac: float = 0.15
 
 
 @dataclass
 class RLParams:
     """RL 参数"""
-    num_states: int = 9
+    num_states: int = 27
     num_actions: int = 6
     alpha: float = 0.3
     gamma: float = 0.9
@@ -57,6 +67,25 @@ class RLParams:
     epsilon_end: float = 0.05
     reward_fitness_weight: float = 0.8
     reward_diversity_weight: float = 0.2
+    reward_best_weight: float = 0.3
+    reward_clip: float = 1.0
+    reward_smoothing: float = 0.15
+    use_adaptive_thresholds: bool = True
+    adaptive_window: int = 60
+    adaptive_min_samples: int = 15
+    stagnation_eps_boost: float = 0.2
+    div_adaptive_quantiles: Tuple[float, float] = (0.3, 0.7)
+    imp_adaptive_quantiles: Tuple[float, float] = (0.25, 0.7)
+    mp_effect_quantiles: Tuple[float, float] = (0.3, 0.7)
+    # Alpha（MP-融合权重）控制
+    alpha_init: float = 0.8
+    alpha_min: float = 0.05
+    alpha_max: float = 1.0
+    alpha_lr: float = 0.05
+    alpha_schedule_pow: float = 1.5
+    per_subpop_controller: bool = True
+    sync_q_interval: int = 60
+    sync_q_tau: float = 0.25
 
 
 @dataclass
@@ -103,6 +132,12 @@ class ExperimentConfig:
             num_generations=self.ga.num_generations,
             p_c=self.ga.p_c,
             p_m=self.ga.p_m,
+            p_m_min=self.ga.p_m_min,
+            p_m_max=self.ga.p_m_max,
+            explore_p_m_scale=self.ga.explore_p_m_scale,
+            exploit_p_m_scale=self.ga.exploit_p_m_scale,
+            explore_sigma_scale=self.ga.explore_sigma_scale,
+            exploit_sigma_scale=self.ga.exploit_sigma_scale,
             dim=self.ga.dim,
             elitism_count=self.ga.elitism_count,
             early_stop_patience=self.ga.early_stop_patience,
@@ -115,6 +150,10 @@ class ExperimentConfig:
             migration_count=self.multipop.migration_count,
             migration_good_threshold=self.multipop.migration_good_threshold,
             migration_bad_threshold=self.multipop.migration_bad_threshold,
+            migration_noise_sigma=self.multipop.migration_noise_sigma,
+            stagnation_div_threshold=self.multipop.stagnation_div_threshold,
+            stagnation_imp_threshold=self.multipop.stagnation_imp_threshold,
+            stagnation_replace_frac=self.multipop.stagnation_replace_frac,
         )
 
 
@@ -125,6 +164,12 @@ class GAParams:
     num_generations: int = 500
     p_c: float = 0.9
     p_m: float = 0.05
+    p_m_min: float = 0.005
+    p_m_max: float = 0.3
+    explore_p_m_scale: float = 1.6
+    exploit_p_m_scale: float = 0.6
+    explore_sigma_scale: float = 1.4
+    exploit_sigma_scale: float = 0.7
     dim: int = 30
     elitism_count: int = 2
     early_stop_patience: int = 50
@@ -137,6 +182,10 @@ class GAParams:
     migration_count: int = 3
     migration_good_threshold: float = 0.01
     migration_bad_threshold: float = 0.001
+    migration_noise_sigma: float = 0.02
+    stagnation_div_threshold: float = 0.15
+    stagnation_imp_threshold: float = 0.001
+    stagnation_replace_frac: float = 0.15
 
 
 # ============================================================================
@@ -227,27 +276,33 @@ class ConfigLoader:
 _loader: Optional[ConfigLoader] = None
 
 
-def get_loader() -> ConfigLoader:
+def get_loader(config_path: str = "config.yaml") -> ConfigLoader:
     """获取配置加载器单例"""
     global _loader
-    if _loader is None:
-        _loader = ConfigLoader()
+    if _loader is None or str(_loader.config_path) != str(config_path):
+        _loader = ConfigLoader(config_path)
     return _loader
 
 
-def load_config(mode: Optional[str] = None) -> ExperimentConfig:
+def load_config(mode: Optional[str] = None, config_path: str = "config.yaml") -> ExperimentConfig:
     """加载指定模式的配置"""
-    loader = get_loader()
+    loader = get_loader(config_path)
     if mode is None:
         mode = loader.get_default_mode()
     return loader.get_mode_config(mode)
 
 
-def build_ga_config(ga_params: GAParams, algo_name: str) -> GAConfig:
+def build_ga_config(
+    ga_params: GAParams,
+    algo_name: str,
+    rl_params: Optional[Dict[str, Any]] = None,
+) -> GAConfig:
     """构建 GAConfig"""
     loader = get_loader()
     switches = loader.get_algorithm_switches(algo_name)
     params_dict = ga_params.__dict__.copy()
+    if rl_params is not None:
+        params_dict["rl_params"] = rl_params
     return GAConfig(**params_dict, **switches)
 
 
@@ -289,7 +344,15 @@ def print_config(config: ExperimentConfig, title: Optional[str] = None) -> None:
     print(f"  学习率:       {config.rl.alpha}")
     print(f"  折扣因子:     {config.rl.gamma}")
     print(f"  探索率:       {config.rl.epsilon_start} → {config.rl.epsilon_end}")
-    print(f"  奖励权重:     fitness={config.rl.reward_fitness_weight}, diversity={config.rl.reward_diversity_weight}")
+    print(f"  奖励权重:     fit={config.rl.reward_fitness_weight}, div={config.rl.reward_diversity_weight}, best={config.rl.reward_best_weight}")
+    print(f"  奖励裁剪/平滑: clip={config.rl.reward_clip}, smooth={config.rl.reward_smoothing}")
+    adapt = "启用" if config.rl.use_adaptive_thresholds else "禁用"
+    print(f"  自适应状态:   {adapt}, window={config.rl.adaptive_window}, boost={config.rl.stagnation_eps_boost}")
+    print(f"  MP影响分箱:   mp_effect_q={config.rl.mp_effect_quantiles}")
+    print(f"  MP融合α:     init={config.rl.alpha_init}, range=[{config.rl.alpha_min}, {config.rl.alpha_max}], lr={config.rl.alpha_lr}")
+    print(f"  α调度:       pow={config.rl.alpha_schedule_pow}")
+    agent_mode = "多子种群独立" if config.rl.per_subpop_controller else "全局单控制器"
+    print(f"  RL 控制器:    {agent_mode}, sync_interval={config.rl.sync_q_interval}, tau={config.rl.sync_q_tau}")
     
     print(f"\n【实验设置】")
     print(f"  随机种子数:   {len(config.seeds)}")
@@ -301,10 +364,10 @@ def print_config(config: ExperimentConfig, title: Optional[str] = None) -> None:
     print(f"{'='*70}\n")
 
 
-def print_modes() -> None:
+def print_modes(config_path: str = "config.yaml") -> None:
     """打印所有可用模式"""
     try:
-        loader = ConfigLoader()
+        loader = get_loader(config_path)
         print("\n可用实验模式:")
         print("-" * 60)
         for mode in loader.list_modes():

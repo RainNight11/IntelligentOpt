@@ -33,7 +33,6 @@ from config import (
     estimate_runtime,
 )
 from ga_core import GARunner
-from rl_controller import RLController
 
 
 def render_progress(prefix: str, idx: int, total: int, bar_width: int = 30):
@@ -69,20 +68,22 @@ def run_one_experiment(
     best_curves = []
     div_curves = []
     final_bests = []
-    rl_counts_total = np.zeros((9, 6), dtype=int)
+    rl_counts_total: Optional[np.ndarray] = None
+    rl_kwargs = vars(cfg.rl).copy()
 
     total_runs = len(seeds)
     for idx, seed in enumerate(seeds, 1):
         if progress_prefix:
             render_progress(f"{progress_prefix} (seed={seed})", idx, total_runs)
-        ga_cfg = build_ga_config(cfg.ga_params, algo_name)
+        ga_cfg = build_ga_config(cfg.ga_params, algo_name, rl_params=rl_kwargs)
         runner = GARunner(ga_cfg)
-        rl_controller = RLController() if ga_cfg.use_rl else None
-        res = runner.run(benchmark, seed=seed, rl_controller=rl_controller)
+        res = runner.run(benchmark, seed=seed, rl_controller=None)
         best_curves.append(res["best_curve"])
         div_curves.append(res["diversity_curve"])
         final_bests.append(res["final_best"])
         if res["rl_counts"] is not None:
+            if rl_counts_total is None:
+                rl_counts_total = np.zeros_like(res["rl_counts"])
             rl_counts_total += res["rl_counts"]
         
         # 中途保存
@@ -92,7 +93,7 @@ def run_one_experiment(
                 best_curves,
                 div_curves,
                 final_bests,
-                rl_counts_total if ga_cfg.use_rl else None,
+                rl_counts_total if (ga_cfg.use_rl and rl_counts_total is not None) else None,
                 seeds[:idx],
             )
     
@@ -132,7 +133,7 @@ def run_one_experiment(
             best_curves,
             div_curves,
             final_bests,
-            rl_counts_total if ga_cfg.use_rl else None,
+            rl_counts_total if (ga_cfg.use_rl and rl_counts_total is not None) else None,
             seeds,
         )
     
@@ -242,17 +243,18 @@ def _save_results_csv(
             
             # 表头说明
             writer.writerow(['# RL 动作选择统计'])
-            writer.writerow(['# 行: 状态 (0-8), 列: 动作 (0-5)'])
-            writer.writerow(['# 状态编码: div_level * 3 + imp_level'])
+            writer.writerow([f'# 行: 状态 (0-{rl_counts.shape[0]-1}), 列: 动作 (0-{rl_counts.shape[1]-1})'])
+            writer.writerow(['# 状态编码: div_level * 3 + imp_level（阈值为自适应估计）'])
             writer.writerow(['#   div_level: 0=低多样性, 1=中, 2=高'])
             writer.writerow(['#   imp_level: 0=停滞, 1=缓慢, 2=快速'])
-            writer.writerow(['# 动作编码:'])
-            writer.writerow(['#   0: 轮盘选择 + 均匀交叉 + 均匀变异'])
-            writer.writerow(['#   1: 锦标赛选择 + 均匀交叉 + 均匀变异'])
-            writer.writerow(['#   2: 锦标赛选择 + 两点交叉 + 高斯变异'])
-            writer.writerow(['#   3: 轮盘选择 + 两点交叉 + 高斯变异'])
-            writer.writerow(['#   4: 排序选择 + 两点交叉 + 自适应变异'])
-            writer.writerow(['#   5: 排序选择 + 均匀交叉 + 自适应变异'])
+            if rl_counts.shape[1] == 6:
+                writer.writerow(['# 动作编码:'])
+                writer.writerow(['#   0: 轮盘选择 + 均匀交叉 + 均匀变异'])
+                writer.writerow(['#   1: 锦标赛选择 + 均匀交叉 + 均匀变异'])
+                writer.writerow(['#   2: 锦标赛选择 + 两点交叉 + 高斯变异'])
+                writer.writerow(['#   3: 轮盘选择 + 两点交叉 + 高斯变异'])
+                writer.writerow(['#   4: 排序选择 + 两点交叉 + 自适应变异'])
+                writer.writerow(['#   5: 排序选择 + 均匀交叉 + 自适应变异'])
             writer.writerow([''])
             
             # 表头
@@ -260,13 +262,16 @@ def _save_results_csv(
             writer.writerow(header)
             
             # 数据行
-            state_names = [
+            default_state_names = [
                 'S0(低div,停滞)', 'S1(低div,慢)', 'S2(低div,快)',
                 'S3(中div,停滞)', 'S4(中div,慢)', 'S5(中div,快)',
                 'S6(高div,停滞)', 'S7(高div,慢)', 'S8(高div,快)',
             ]
             for i, row in enumerate(rl_counts):
-                name = state_names[i] if i < len(state_names) else f'State_{i}'
+                if rl_counts.shape[0] == len(default_state_names):
+                    name = default_state_names[i]
+                else:
+                    name = f'State_{i}'
                 writer.writerow([name] + list(row) + [row.sum()])
             
             # 各动作总计
@@ -312,8 +317,8 @@ def plot_rl_heatmap(benchmark_name: str, algo_name: str, counts: np.ndarray, out
     plt.figure(figsize=(6, 4))
     plt.imshow(counts, cmap="viridis")
     plt.colorbar(label="Selection count")
-    plt.xlabel("Action id (0-5)")
-    plt.ylabel("State id (0-8)")
+    plt.xlabel(f"Action id (0-{counts.shape[1]-1})")
+    plt.ylabel(f"State id (0-{counts.shape[0]-1})")
     plt.title(f"RL policy counts: {algo_name} on {benchmark_name}")
     plt.tight_layout()
     os.makedirs(output_dir, exist_ok=True)
@@ -770,19 +775,19 @@ def main():
 
     # 列出模式
     if args.list_modes:
-        print_modes()
+        print_modes(args.config)
         return
     
     # 显示配置
     if args.show_config:
-        cfg = load_config(args.show_config)
+        cfg = load_config(args.show_config, config_path=args.config)
         print_config(cfg)
         print(f"预计运行时间: {estimate_runtime(cfg)}")
         return
     
     # 验证配置
     if args.validate:
-        cfg = load_config(args.validate)
+        cfg = load_config(args.validate, config_path=args.config)
         check_config(cfg)
         return
     
@@ -801,7 +806,7 @@ def main():
     
     # 加载配置并运行
     try:
-        cfg = load_config(mode)
+        cfg = load_config(mode, config_path=args.config)
     except ValueError as e:
         print(f"错误: {e}")
         print("\n使用 --list-modes 查看可用模式")

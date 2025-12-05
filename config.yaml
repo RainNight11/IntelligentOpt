@@ -16,13 +16,19 @@ default_mode: full
 # ============================================================================
 ga:
   # 种群参数
-  population_size: 200        # 种群大小 [建议: 50-500]
-  dim: 30                     # 问题维度（决策变量数量）
+  population_size: 400        # 种群大小 [建议: 50-500]
+  dim: 40                     # 问题维度（决策变量数量）
   
   # 进化参数
   num_generations: 500        # 最大进化代数 [建议: 100-2000]
   p_c: 0.9                    # 交叉概率 [建议: 0.6-0.95]
   p_m: 0.05                   # 变异概率 [建议: 0.01-0.1]
+  p_m_min: 0.005              # 变异概率下限（RL 动态缩放后裁剪）
+  p_m_max: 0.25               # 变异概率上限（RL 动态缩放后裁剪）
+  explore_p_m_scale: 1.6      # 探索型动作的变异放大倍数
+  exploit_p_m_scale: 0.6      # 开发型动作的变异缩小倍数
+  explore_sigma_scale: 1.4    # 探索型动作的高斯σ放大
+  exploit_sigma_scale: 0.7    # 开发型动作的高斯σ缩小
   
   # 精英保留
   elitism_count: 2            # 精英保留数量 [建议: 1-5, 0=禁用]
@@ -45,13 +51,17 @@ multipop:
   migration_count: 3          # 每次迁移个体数 [建议: 1-5]
   migration_good_threshold: 0.01   # "优秀"子种群改进率阈值
   migration_bad_threshold: 0.001   # "停滞"子种群改进率阈值
+  migration_noise_sigma: 0.02      # 迁移时对精英加入噪声，避免克隆
+  stagnation_div_threshold: 0.15   # 多样性低于此值触发随机注入（MP+RL）
+  stagnation_imp_threshold: 0.001  # 改进率低于此值触发随机注入（MP+RL）
+  stagnation_replace_frac: 0.15    # 随机注入的替换比例（最差个体占比）
 
 # ============================================================================
 # 三、RL（强化学习）参数
 # ============================================================================
 rl:
   # Q-learning 核心参数
-  num_states: 9               # 状态空间大小 (3×3: 多样性×改进)
+  num_states: 27              # 状态空间大小 (3×3×3: 多样性×改进×MP影响)
   num_actions: 6              # 动作空间大小（算子组合数）
   alpha: 0.3                  # 学习率 [建议: 0.1-0.5]
   gamma: 0.9                  # 折扣因子 [建议: 0.8-0.99]
@@ -63,6 +73,27 @@ rl:
   # 奖励函数权重
   reward_fitness_weight: 0.8  # 适应度改进权重 [建议: 0.6-0.9]
   reward_diversity_weight: 0.2 # 多样性变化权重 [和=1.0]
+  reward_best_weight: 0.3      # 最优值改进奖励，抑制过快收敛
+  reward_clip: 1.0             # 奖励裁剪，稳定学习
+  reward_smoothing: 0.15       # 奖励滑动平均
+
+  # 自适应状态与探索
+  use_adaptive_thresholds: true  # 是否根据历史统计自适应划分状态
+  adaptive_window: 60            # 自适应窗口长度
+  adaptive_min_samples: 15       # 启动自适应所需样本
+  stagnation_eps_boost: 0.2      # 停滞时额外探索
+  div_adaptive_quantiles: [0.3, 0.7]  # 多样性阈值分位
+  imp_adaptive_quantiles: [0.25, 0.7] # 改进率阈值分位
+  mp_effect_quantiles: [0.3, 0.7]     # MP影响分位，用于状态离散
+  # MP融合权重 α
+  alpha_init: 0.8              # 初始 α（偏向多种群探索）
+  alpha_min: 0.05              # 最小 α
+  alpha_max: 1.0               # 最大 α
+  alpha_lr: 0.05               # α 更新步长（随奖励调整）
+  alpha_schedule_pow: 1.5      # α 随进度衰减的幂次（越大后期越低）
+  per_subpop_controller: true    # 多种群时为每个子种群分配独立 RL
+  sync_q_interval: 60            # 同步 Q 表的代数间隔 (0=禁用)
+  sync_q_tau: 0.25               # 同步强度 (0-1)
 
 # ============================================================================
 # 四、算法变体定义
@@ -308,4 +339,3 @@ advanced:
   cache:
     enabled: false              # 是否缓存中间结果
     dir: ".cache"               # 缓存目录
-

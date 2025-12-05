@@ -51,6 +51,13 @@ class GAConfig:
     early_stop_tolerance: float = 1e-8
     gaussian_sigma: float = 0.1
     tournament_k: int = 3
+    # 变异自适应尺度（配合 RL 区分探索/开发）
+    p_m_min: float = 0.005
+    p_m_max: float = 0.3
+    explore_p_m_scale: float = 1.6
+    exploit_p_m_scale: float = 0.6
+    explore_sigma_scale: float = 1.4
+    exploit_sigma_scale: float = 0.7
     # 算法开关
     use_multipop: bool = False
     use_rescue_migration: bool = False
@@ -62,6 +69,13 @@ class GAConfig:
     migration_count: int = 3
     migration_good_threshold: float = 0.01
     migration_bad_threshold: float = 0.001
+    migration_noise_sigma: float = 0.02
+    # 停滞注入
+    stagnation_div_threshold: float = 0.15
+    stagnation_imp_threshold: float = 0.001
+    stagnation_replace_frac: float = 0.15
+    # RL 参数可选
+    rl_params: Optional[Dict[str, object]] = None
 
 
 def compute_diversity(pop: np.ndarray, lower: float, upper: float) -> float:
@@ -91,6 +105,14 @@ class GARunner:
         3: ("roulette", "two_point", "gaussian"),
         4: ("rank", "two_point", "adaptive_gaussian"),
         5: ("rank", "uniform", "adaptive_gaussian"),
+    }
+    ACTION_STYLE = {
+        0: "explore",
+        1: "explore",
+        2: "balanced",
+        3: "balanced",
+        4: "exploit",
+        5: "exploit",
     }
     
     def __init__(self, config: GAConfig):
@@ -183,18 +205,32 @@ class GARunner:
         """
         lower, upper = bounds
         selection_name, crossover_name, mutation_name = self.ACTION_MAP[action_id]
-        
+        # 动态调整变异强度：探索动作更激进，开发动作更保守；多样性越低，变异越强
+        style = self.ACTION_STYLE.get(action_id, "balanced")
+        p_m = self.config.p_m
+        sigma = self.config.gaussian_sigma
+        if style == "explore":
+            p_m *= self.config.explore_p_m_scale
+            sigma *= self.config.explore_sigma_scale
+        elif style == "exploit":
+            p_m *= self.config.exploit_p_m_scale
+            sigma *= self.config.exploit_sigma_scale
+        # 多样性低时额外提升变异概率
+        p_m *= (1.0 + 0.6 * max(0.0, 0.5 - div_norm))
+        p_m = min(self.config.p_m_max, max(self.config.p_m_min, p_m))
+        sigma = max(1e-4, sigma)
+
         return batch_reproduce(
             population=population,
             fitness=fitness,
             p_c=self.config.p_c,
-            p_m=self.config.p_m,
+            p_m=p_m,
             lower=lower,
             upper=upper,
             selection_fn=selection_name,
             crossover_fn=crossover_name,
             mutation_fn=mutation_name,
-            sigma=self.config.gaussian_sigma,
+            sigma=sigma,
             tournament_k=self.config.tournament_k,
             diversity=div_norm,
         )
@@ -267,7 +303,10 @@ class GARunner:
 
         pop_bad = pop_bad.copy()
         fit_bad = fit_bad.copy()
-        pop_bad[worst_indices] = pop_good[elite_indices]
+        # 复制精英并注入小噪声，防止完全克隆导致多样性塌陷
+        noise = np.random.randn(*pop_good[elite_indices].shape) * cfg.migration_noise_sigma * (upper - lower)
+        migrated = np.clip(pop_good[elite_indices] + noise, lower, upper)
+        pop_bad[worst_indices] = migrated
         fit_bad[worst_indices] = fit_good[elite_indices]
 
         subpops[bad_idx] = np.clip(pop_bad, lower, upper)
@@ -313,12 +352,27 @@ class GARunner:
             ]
 
         # 初始化 RL 控制器
-        if rl_controller is None and cfg.use_rl:
-            rl_controller = RLController()
+        rl_settings = cfg.rl_params or {}
+        controller_kwargs = RLController.filter_kwargs(rl_settings)
+        multi_agent = bool(rl_settings.get("per_subpop_controller", cfg.use_multipop))
+        sync_interval = int(rl_settings.get("sync_q_interval", 0))
+        sync_tau = float(rl_settings.get("sync_q_tau", 0.0))
+        sync_tau = min(1.0, max(0.0, sync_tau))
+        rl_controllers: List[RLController] = []
+        if rl_controller is not None:
+            rl_controllers = [rl_controller]
+            multi_agent = False
+        elif cfg.use_rl:
+            if multi_agent and cfg.use_multipop:
+                rl_controllers = [RLController(**controller_kwargs) for _ in subpops]
+            else:
+                rl_controllers = [RLController(**controller_kwargs)]
+                multi_agent = False
 
         # 状态跟踪
         best_history = [[] for _ in subpops]
         prev_mean = [None for _ in subpops]
+        last_mp_signals: List[Tuple[float, float, float]] = [(0.0, 0.0, 0.0) for _ in subpops]
         global_best_history: List[float] = []
         div_min, div_max = np.inf, 0.0
 
@@ -373,9 +427,12 @@ class GARunner:
             # 进化各子种群
             next_subpops = []
             next_fitness = []
+            next_mp_signals: List[Tuple[float, float, float]] = []
+            global_pop = np.concatenate(subpops) if cfg.use_multipop else None
+            global_fit = np.concatenate(fitness_list) if cfg.use_multipop else None
 
             for idx, (pop, fit, stat) in enumerate(zip(subpops, fitness_list, stats)):
-                _, mean, _, _, div_norm = stat
+                best_val, mean, _, _, div_norm = stat
                 
                 # 计算改进率
                 if prev_mean[idx] is None:
@@ -384,29 +441,93 @@ class GARunner:
                     improvement = (prev_mean[idx] - mean) / (abs(prev_mean[idx]) + 1e-12)
                 prev_mean[idx] = mean
 
+                # 停滞+低多样性时，注入随机个体以拉高多样性（只在多种群+RL时启用）
+                if (
+                    cfg.use_multipop
+                    and cfg.use_rl
+                    and div_norm < cfg.stagnation_div_threshold
+                    and improvement <= cfg.stagnation_imp_threshold
+                ):
+                    replace_count = max(1, int(len(pop) * cfg.stagnation_replace_frac))
+                    worst_idx = np.argsort(fit)[-replace_count:]
+                    pop = pop.copy()
+                    pop[worst_idx] = np.random.uniform(
+                        benchmark.lower,
+                        benchmark.upper,
+                        size=(replace_count, dim),
+                    )
+                    fit = benchmark(pop)
+                    best_val = float(np.min(fit))
+                    mean = float(np.mean(fit))
+                    div = compute_diversity(pop, benchmark.lower, benchmark.upper)
+                    div_min = min(div_min, div)
+                    div_max = max(div_max, div)
+                    div_norm = 0.0 if div_max == div_min else (div - div_min) / (div_max - div_min)
+
                 # 选择动作
                 state = 0
                 action = self._default_action()
-                if cfg.use_rl and rl_controller is not None:
-                    state = RLController.encode_state(div_norm, improvement)
-                    action = rl_controller.select_action(state, g, cfg.num_generations)
+                ctrl = None
+                if cfg.use_rl and rl_controllers:
+                    ctrl = rl_controllers[idx] if (multi_agent and idx < len(rl_controllers)) else rl_controllers[0]
+                    state = ctrl.encode_state(div_norm, improvement, last_mp_signals[idx])
+                    action = ctrl.select_action(state, g, cfg.num_generations, improvement)
 
                 # 繁殖新种群（向量化）
-                new_pop = self._select_and_reproduce_vectorized(pop, fit, action, bounds, div_norm)
-                new_fit = benchmark(new_pop)
+                # GA offspring（本子群）
+                new_pop_ga = self._select_and_reproduce_vectorized(pop, fit, action, bounds, div_norm)
+                new_fit_ga = benchmark(new_pop_ga)
+                mp_signal = (0.0, 0.0, 0.0)
+
+                # 仅在 MP+RL 时尝试全局池候选
+                if cfg.use_multipop and cfg.use_rl and ctrl is not None and global_pop is not None and global_fit is not None:
+                    global_div_norm = global_div
+                    new_pop_mp_full = self._select_and_reproduce_vectorized(global_pop, global_fit, action, bounds, global_div_norm)
+                    new_pop_mp = new_pop_mp_full[: len(pop)]  # 与当前子群等长
+                    new_fit_mp = benchmark(new_pop_mp)
+
+                    # 多样性与相对收益
+                    mp_div = compute_diversity(new_pop_mp, benchmark.lower, benchmark.upper)
+                    div_min = min(div_min, mp_div)
+                    div_max = max(div_max, mp_div)
+                    mp_div_norm = 0.0 if div_max == div_min else (mp_div - div_min) / (div_max - div_min)
+                    mp_div_delta = mp_div_norm - div_norm
+                    mean_ga = float(np.mean(new_fit_ga))
+                    mean_mp = float(np.mean(new_fit_mp))
+                    mp_fit_gain = (mean_ga - mean_mp) / (abs(mean_ga) + 1e-12)  # >0 表示 MP 更好
+                    mp_diff_norm = float(
+                        np.mean(np.abs(new_pop_mp - new_pop_ga)) / (abs(benchmark.upper - benchmark.lower) + 1e-12)
+                    )
+                    mp_signal = (mp_div_delta, mp_diff_norm, mp_fit_gain)
+
+                    # 选择更优个体（逐个体择优，避免将劣质 MP 混入）
+                    use_mp_mask = new_fit_mp <= new_fit_ga
+                    new_pop = np.where(use_mp_mask[:, None], new_pop_mp, new_pop_ga)
+                    new_fit = np.where(use_mp_mask, new_fit_mp, new_fit_ga)
+
+                    # 若整体 MP 明显更优且多样性提升，可追加一层平滑混合以保留差异性
+                    if mp_fit_gain > 0 and mp_div_delta > 0:
+                        alpha = ctrl.get_alpha(state, g, cfg.num_generations)
+                        new_pop = np.clip(alpha * new_pop_mp + (1.0 - alpha) * new_pop, benchmark.lower, benchmark.upper)
+                        new_fit = benchmark(new_pop)
+                else:
+                    new_pop = new_pop_ga
+                    new_fit = new_fit_ga
 
                 # 精英保留
                 new_pop, new_fit = self._apply_elitism(pop, fit, new_pop, new_fit)
                 
                 # RL 更新
-                if cfg.use_rl and rl_controller is not None:
+                if cfg.use_rl and rl_controllers and ctrl is not None:
                     new_div = compute_diversity(new_pop, benchmark.lower, benchmark.upper)
                     div_min = min(div_min, new_div)
                     div_max = max(div_max, new_div)
                     new_div_norm = 0.0 if div_max == div_min else (new_div - div_min) / (div_max - div_min)
 
-                    f_old, f_new = mean, float(np.mean(new_fit))
+                    f_old = mean
+                    f_new = float(np.mean(new_fit))
                     div_old, div_new = div_norm, new_div_norm
+                    best_new = float(np.min(new_fit))
                     
                     # 计算奖励
                     r_fit = (f_old - f_new) / (abs(f_old) + 1e-12)
@@ -417,25 +538,48 @@ class GARunner:
                         r_div = max(-0.3, delta_d)
                     else:
                         r_div = 0.0
-                    
-                    reward = rl_controller.reward_fitness_weight * r_fit + \
-                             rl_controller.reward_diversity_weight * r_div
 
-                    next_state = RLController.encode_state(
-                        new_div_norm,
-                        (f_old - f_new) / (abs(f_old) + 1e-12)
+                    r_best = (best_val - best_new) / (abs(best_val) + 1e-12)
+                    reward = (
+                        ctrl.reward_fitness_weight * r_fit
+                        + ctrl.reward_diversity_weight * r_div
+                        + ctrl.reward_best_weight * r_best
                     )
-                    rl_controller.update(state, action, reward, next_state)
+                    reward = ctrl.shape_reward(reward)
+
+                    next_state = ctrl.encode_state(
+                        new_div_norm,
+                        (f_old - f_new) / (abs(f_old) + 1e-12),
+                        mp_signal,
+                    )
+                    ctrl.update(state, action, reward, next_state)
 
                 next_subpops.append(new_pop)
                 next_fitness.append(new_fit)
+                next_mp_signals.append(mp_signal)
 
             subpops = next_subpops
             fitness_list = next_fitness
+            last_mp_signals = next_mp_signals
+
+            # RL 控制器同步
+            if (
+                cfg.use_rl
+                and multi_agent
+                and rl_controllers
+                and sync_interval > 0
+                and sync_tau > 0
+                and ((g + 1) % sync_interval == 0)
+            ):
+                mean_q = np.mean([ctrl.q_table for ctrl in rl_controllers], axis=0)
+                for ctrl in rl_controllers:
+                    ctrl.q_table = (1.0 - sync_tau) * ctrl.q_table + sync_tau * mean_q
 
         # 最终结果
         final_best = min(float(np.min(fit)) for fit in fitness_list)
-        rl_counts = rl_controller.counts.copy() if (cfg.use_rl and rl_controller is not None) else None
+        rl_counts = None
+        if cfg.use_rl and rl_controllers:
+            rl_counts = np.sum([ctrl.counts for ctrl in rl_controllers], axis=0)
         
         return {
             "best_curve": np.array(best_curve),
