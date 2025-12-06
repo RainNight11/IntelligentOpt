@@ -20,7 +20,7 @@ ga:
   dim: 40                     # 问题维度（决策变量数量）
   
   # 进化参数
-  num_generations: 500        # 最大进化代数 [建议: 100-2000]
+  num_generations: 2000       # 最大进化代数 [建议: 100-2000]
   p_c: 0.9                    # 交叉概率 [建议: 0.6-0.95]
   p_m: 0.05                   # 变异概率 [建议: 0.01-0.1]
   p_m_min: 0.005              # 变异概率下限（RL 动态缩放后裁剪）
@@ -179,6 +179,11 @@ benchmarks:
     type: "multimodal"
     bounds: [-500, 500]
     optimal: 0
+  styblinski_tang:
+    name: "Styblinski-Tang"
+    type: "multimodal"
+    bounds: [-5, 5]
+    optimal: -1174.9797   # 约 = -39.16599 * 30（30维）
 
 # ============================================================================
 # 六、实验模式预设
@@ -190,7 +195,7 @@ modes:
     seeds: 30                   # 随机种子数量（统计显著性要求）
     ga:
       population_size: 200
-      num_generations: 500
+      num_generations: 2000
       early_stop_patience: 0    # 论文实验禁用早停，确保曲线完整
     algorithms:
       - GA_baseline             # 基线算法
@@ -208,6 +213,7 @@ modes:
       - rosenbrock              # F6: 山谷形状（困难）
       - levy                    # F7: 多峰
       - schwefel                # F8: 欺骗性（全局最优远离局部最优）
+      - styblinski_tang         # F9: 多峰且全局最优非零点
     output_dir: "results/full"
   
   # -------------------- 快速测试 --------------------

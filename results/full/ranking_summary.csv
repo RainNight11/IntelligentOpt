@@ -1,12 +1,13 @@
 Benchmark,GA_MP,GA_MP_RL,GA_RL,GA_baseline
 sphere,3,1,2,4
 sum_squares,3,1,2,4
-rastrigin,4,1,2,3
-ackley,2,1,4,3
+rastrigin,3,1,2,4
+ackley,2,1,3,4
 griewank,3,1,2,4
 rosenbrock,3,1,2,4
 levy,2,1,3,4
 schwefel,4,1,2,3
+styblinski_tang,4,1,2,3
 
-Average Rank,3.00,1.00,2.38,3.62
-Best Count,0,8,0,0
+Average Rank,3.00,1.00,2.22,3.78
+Best Count,0,9,0,0

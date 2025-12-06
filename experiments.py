@@ -617,15 +617,22 @@ def plot_convergence_comparison(
     
     for idx, (bench_name, bench_curves) in enumerate(all_curves.items()):
         ax = axes[idx]
+        ymin = np.inf
         for i, (algo_name, curve) in enumerate(bench_curves.items()):
             ax.plot(curve, label=algo_name, color=colors[i % len(colors)], linewidth=1.5)
-        
+            if len(curve) > 0:
+                ymin = min(ymin, float(np.min(curve)))
+
         ax.set_xlabel('Generation')
         ax.set_ylabel('Best Fitness')
         ax.set_title(bench_name)
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
-        ax.set_yscale('log')  # 对数坐标更好展示收敛
+        # 若存在非正值，使用 symlog，避免 log 视图下曲线消失
+        if ymin <= 0:
+            ax.set_yscale('symlog', linthresh=1e-6)
+        else:
+            ax.set_yscale('log')  # 对数坐标更好展示收敛
     
     # 隐藏多余的子图
     for idx in range(n_benchmarks, len(axes)):
