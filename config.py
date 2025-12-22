@@ -188,6 +188,30 @@ class GAParams:
     stagnation_replace_frac: float = 0.15
 
 
+@dataclass
+class ComparisonConfig:
+    """对比实验配置（从 config.yaml 的 comparison.modes 加载）
+
+    用于 compare_experiments.py 中的多算法对比实验。
+    """
+
+    mode: str = "quick"
+    description: str = ""
+    seeds: List[int] = field(default_factory=lambda: list(range(5)))
+    population_size: int = 100
+    num_generations: int = 200
+    dim: int = 30
+    benchmarks: Tuple[str, ...] = ("rastrigin", "ackley", "rosenbrock")
+    our_methods: Tuple[str, ...] = ("MPRL-GA",)
+    baseline_methods: Tuple[str, ...] = ("GA_baseline", "PSO", "DE", "ES", "SA", "ACO")
+    output_dir: str = "results/comparison_quick"
+
+    @property
+    def all_algorithms(self) -> List[str]:
+        """所有参与对比的算法列表"""
+        return list(self.our_methods) + list(self.baseline_methods)
+
+
 # ============================================================================
 # 二、配置加载器
 # ============================================================================
@@ -261,6 +285,50 @@ class ConfigLoader:
                 "use_rl": algo_cfg.get("use_rl", False),
             }
         return self.ALGORITHM_SWITCHES.get(algo_name, self.ALGORITHM_SWITCHES["GA_baseline"])
+
+    # ---------------- 对比实验相关 ----------------
+
+    def get_comparison_config(self, mode: str = "quick") -> ComparisonConfig:
+        """从 YAML 加载对比实验配置 comparison.modes[mode]"""
+        comparison = self._raw_config.get("comparison", {})
+        modes = comparison.get("modes", {})
+        if mode not in modes:
+            available = list(modes.keys()) if modes else []
+            raise ValueError(f"未知对比实验模式: {mode}。可用: {available}")
+
+        mode_cfg = modes[mode]
+        seeds_val = mode_cfg.get("seeds", 5)
+        seeds = list(range(seeds_val)) if isinstance(seeds_val, int) else list(seeds_val)
+
+        return ComparisonConfig(
+            mode=mode,
+            description=mode_cfg.get("description", ""),
+            seeds=seeds,
+            population_size=mode_cfg.get("population_size", 100),
+            num_generations=mode_cfg.get("num_generations", 200),
+            dim=mode_cfg.get("dim", 30),
+            benchmarks=tuple(mode_cfg.get("benchmarks", ["rastrigin", "ackley", "rosenbrock"])),
+            our_methods=tuple(mode_cfg.get("our_methods", ["MPRL-GA"])),
+            baseline_methods=tuple(
+                mode_cfg.get("baseline_methods", ["GA_baseline", "PSO", "DE", "ES", "SA", "ACO"])
+            ),
+            output_dir=mode_cfg.get("output_dir", f"results/comparison_{mode}"),
+        )
+
+    def list_comparison_modes(self) -> List[str]:
+        """列出所有对比实验模式"""
+        comparison = self._raw_config.get("comparison", {})
+        return list(comparison.get("modes", {}).keys())
+
+    def get_baseline_algorithms(self) -> Dict[str, List[str]]:
+        """获取对比实验中使用的基线算法（按类别分组）"""
+        comparison = self._raw_config.get("comparison", {})
+        return comparison.get(
+            "baseline_algorithms",
+            {
+                "classic": ["GA_baseline", "PSO", "DE", "ES", "SA", "ACO"],
+            },
+        )
     
     @staticmethod
     def _merge_dict(base: Dict, override: Dict) -> Dict:
@@ -290,6 +358,26 @@ def load_config(mode: Optional[str] = None, config_path: str = "config.yaml") ->
     if mode is None:
         mode = loader.get_default_mode()
     return loader.get_mode_config(mode)
+
+
+def load_comparison_config(
+    mode: str = "quick", config_path: str = "config.yaml"
+) -> ComparisonConfig:
+    """加载对比实验配置 comparison.modes[mode]"""
+    loader = get_loader(config_path)
+    return loader.get_comparison_config(mode)
+
+
+def list_comparison_modes(config_path: str = "config.yaml") -> List[str]:
+    """列出所有对比实验模式"""
+    loader = get_loader(config_path)
+    return loader.list_comparison_modes()
+
+
+def get_baseline_algorithms(config_path: str = "config.yaml") -> Dict[str, List[str]]:
+    """获取所有基线算法分组"""
+    loader = get_loader(config_path)
+    return loader.get_baseline_algorithms()
 
 
 def build_ga_config(
